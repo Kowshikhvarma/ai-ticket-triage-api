@@ -63,7 +63,7 @@ The rule engine misses nuance, for example a "thank you for the training" email 
 ## Quick start
 
 ```bash
-git clone https://github.com/<your-username>/ai-ticket-triage-api.git
+git clone https://github.com/Kowshikhvarma/ai-ticket-triage-api.git
 cd ai-ticket-triage-api
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
