@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CS Triage Inbox</title>
+<style>
+  :root { --bg:#f6f7fb; --card:#fff; --ink:#1d2433; --muted:#6b7385; --line:#e4e7ef;
+          --high:#d64545; --medium:#e08a1e; --low:#2e9e6b; --accent:#3b5bdb; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:20px 28px; background:var(--card); border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; }
+  h1 { font-size:20px; margin:0; }
+  .muted { color:var(--muted); font-size:13px; }
+  main { padding:24px 28px; display:grid; grid-template-columns: 380px 1fr; gap:24px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; }
+  label { display:block; font-size:12px; font-weight:600; margin:10px 0 4px; color:var(--muted); }
+  input, textarea, select { width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+  textarea { min-height:130px; resize:vertical; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:10px 14px; font-weight:600; cursor:pointer; margin-top:12px; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); padding:5px 10px; margin:0; font-size:12px; }
+  .kpis { display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-bottom:16px; }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .kpi b { display:block; font-size:22px; }
+  .ticket { border:1px solid var(--line); border-left:5px solid var(--low); border-radius:8px; padding:12px 14px; margin-bottom:10px; background:var(--card); }
+  .ticket.high { border-left-color:var(--high); } .ticket.medium { border-left-color:var(--medium); }
+  .ticket .top { display:flex; justify-content:space-between; gap:12px; align-items:center; }
+  .pill { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:99px; background:#eef0f6; margin-right:4px; }
+  .pill.high { background:#fde8e8; color:var(--high);} .pill.medium{background:#fdf0e1;color:var(--medium);} .pill.low{background:#e3f4ec;color:var(--low);}
+  .pill.risk { background:#fde8e8; color:var(--high); }
+  details { margin-top:8px; font-size:13px; } pre { white-space:pre-wrap; font-family:inherit; background:#f6f7fb; padding:10px; border-radius:6px; }
+  .filters { display:flex; gap:8px; margin-bottom:12px; } .filters select { width:auto; }
+</style>
+</head>
+<body>
+<header>
+  <div><h1>📨 Customer Success Triage Inbox</h1><div class="muted" id="engine">Loading…</div></div>
+  <a class="muted" href="/docs">API docs →</a>
+</header>
+<main>
+  <section class="card">
+    <h3 style="margin-top:0">Triage a new email</h3>
+    <form id="form">
+      <label>From</label><input name="sender" type="email" required value="priya@acmehealth.com" />
+      <label>Account</label><input name="account_name" value="Acme Health" />
+      <label>Subject</label><input name="subject" required value="Production is down - nobody can log in" />
+      <label>Body</label><textarea name="body" required>Since 9am none of our 40 users can log in. This is blocking our payroll run today. Please help urgently.</textarea>
+      <button type="submit">Triage &amp; create ticket</button>
+    </form>
+  </section>
+  <section>
+    <div class="kpis" id="kpis"></div>
+    <div class="filters">
+      <select id="fPriority"><option value="">All priorities</option><option>high</option><option>medium</option><option>low</option></select>
+      <select id="fStatus"><option value="">All statuses</option><option value="open">open</option><option value="in_progress">in progress</option><option value="resolved">resolved</option></select>
+    </div>
+    <div id="list"></div>
+  </section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+  return r.json();
+}
+
+async function refresh() {
+  const [s, health] = await Promise.all([api("/stats"), api("/health")]);
+  $("#engine").textContent = `Engine: ${health.engine.toUpperCase()} · Alerts: ${health.alerts ? "on" : "off (no webhook set)"}`;
+  $("#kpis").innerHTML = [
+    ["Open tickets", s.open], ["High priority", s.by_priority.high || 0],
+    ["Churn risk (open)", s.churn_risk_open], ["SLA met", s.sla_met_pct == null ? "–" : s.sla_met_pct + "%"],
+  ].map(([k, v]) => `<div class="kpi"><span class="muted">${k}</span><b>${v}</b></div>`).join("");
+
+  const q = new URLSearchParams();
+  if ($("#fPriority").value) q.set("priority", $("#fPriority").value);
+  if ($("#fStatus").value) q.set("status", $("#fStatus").value);
+  const tickets = await api("/tickets?" + q);
+  $("#list").innerHTML = tickets.length ? tickets.map(t => `
+    <div class="ticket ${t.priority}">
+      <div class="top">
+        <div><b>#${t.id} ${esc(t.subject)}</b><div class="muted">${esc(t.account_name || t.sender)} · due ${new Date(t.due_at + "Z").toLocaleString()}${t.sla_breached && t.status !== "resolved" ? " · <b style='color:var(--high)'>SLA breached</b>" : ""}</div></div>
+        <div>${t.status !== "resolved" ? `<button class="ghost" onclick="resolve(${t.id})">Resolve</button>` : "<span class='pill low'>resolved</span>"}</div>
+      </div>
+      <div style="margin-top:8px">
+        <span class="pill ${t.priority}">${t.priority}</span><span class="pill">${t.category.replace("_", " ")}</span>
+        <span class="pill">${t.sentiment}</span>${t.churn_risk ? '<span class="pill risk">churn risk</span>' : ""}
+        <span class="pill">${t.engine} · ${Math.round(t.confidence * 100)}%</span>
+      </div>
+      <div style="margin-top:8px;font-size:14px">${esc(t.summary)}</div>
+      <details><summary>Suggested reply</summary><pre>${esc(t.suggested_reply)}</pre></details>
+    </div>`).join("") : '<div class="card muted">No tickets yet. Triage an email on the left.</div>';
+}
+
+async function resolve(id) {
+  await api(`/tickets/${id}`, { method: "PATCH", body: JSON.stringify({ status: "resolved" }) });
+  refresh();
+}
+
+$("#form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target));
+  try { await api("/tickets", { method: "POST", body: JSON.stringify(data) }); refresh(); }
+  catch (err) { alert(err.message); }
+});
+$("#fPriority").onchange = refresh; $("#fStatus").onchange = refresh;
+refresh();
+</script>
+</body>
+</html>

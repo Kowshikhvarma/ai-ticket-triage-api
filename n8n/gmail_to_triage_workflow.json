@@ -1,0 +1,41 @@
+{
+  "name": "Gmail -> AI Triage API",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": { "item": [ { "mode": "everyMinute" } ] },
+        "simple": false,
+        "filters": { "labelIds": [ "INBOX" ] },
+        "options": {}
+      },
+      "name": "New client email",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [ 240, 300 ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TRIAGE_API_URL || 'http://localhost:8000' }}/tickets",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [ { "name": "X-API-Key", "value": "={{ $env.TRIAGE_API_KEY || '' }}" } ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ sender: $json.from.value[0].address, subject: $json.subject || '(no subject)', body: ($json.text || $json.snippet || '').slice(0, 20000) }) }}",
+        "options": {}
+      },
+      "name": "Triage & create ticket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [ 520, 300 ]
+    }
+  ],
+  "connections": {
+    "New client email": {
+      "main": [ [ { "node": "Triage & create ticket", "type": "main", "index": 0 } ] ]
+    }
+  },
+  "settings": {}
+}
